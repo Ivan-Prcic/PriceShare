@@ -28,7 +28,7 @@ ns.FRESH = FRESH
 -- not read from PriceShare.toc: WoW reads .toc files only when the game starts, so after
 -- an update and a /reload the .toc would still report the old version.
 -- (Keep "## Version" in PriceShare.toc the same; Update-PriceShare.bat reads that one.)
-ns.VERSION = "1.3.2"
+ns.VERSION = "1.4"
 ns.UPDATE_HOW = "double-click Update-PriceShare.bat in Interface\\AddOns\\PriceShare, then /reload"
 
 -- true when version a is newer than b ("1.10" > "1.9")
@@ -165,9 +165,25 @@ ns.MyRealm = MyRealm
 local function Squash(s)
   return (tostring(s or ""):gsub("[%s%-']", ""):lower())
 end
+-- Realms that share one Auction House. On Forever, realms of one cluster and type do
+-- ("CAMWOWEU4Realm6PvP" and "CAMWOWEU4Realm8PvP" -> "camwoweu4|pvp"; checked in game:
+-- the same listings on both). Other names: just the realm itself.
+function ns.AHGroup(realm)
+  local r = Squash(realm)
+  local cluster, kind = r:match("^(.-)realm%d+(.*)$")
+  if cluster and cluster ~= "" then
+    return cluster .. "|" .. kind
+  end
+  return r
+end
+
 function ns.IsMyRealm(realm)
   local r = Squash(realm)
-  return r ~= "" and (r == Squash(MyRealm()) or r == Squash(GetRealmName and GetRealmName()))
+  if r == "" then
+    return false
+  end
+  return r == Squash(MyRealm()) or r == Squash(GetRealmName and GetRealmName())
+    or ns.AHGroup(r) == ns.AHGroup(MyRealm())
 end
 
 -- First word of a name, lower case: "Zakstor Wildroot-Realm" -> "zakstor"
@@ -215,7 +231,7 @@ function ns.Short(name)
     return "?"
   end
   local base, realm = name:match("^(.-)%-([^%-]+)$")
-  if base and realm == MyRealm() then
+  if base and (realm == MyRealm() or ns.IsMyRealm(realm)) then
     return base
   end
   return name

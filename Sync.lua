@@ -1066,8 +1066,9 @@ local function Check()
   Sync.LogSocial()
   local whisper = Sweep()
   ns.Print("check")
-  print(string.format("   You are \"%s\" on realm %s, %s. Friends must be on the same realm and faction.",
-    tostring(ns.me), ns.MyRealm(), tostring(UnitFactionGroup("player"))))
+  print(string.format("   You are \"%s\" on realm %s, %s. Friends must be on the same faction and on a realm " ..
+    "sharing your Auction House (%s).", tostring(ns.me), ns.MyRealm(), tostring(UnitFactionGroup("player")),
+    ns.AHGroup(ns.MyRealm())))
   local codes = {}
   for code, n in pairs(results) do
     if code ~= "0" then

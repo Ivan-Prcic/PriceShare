@@ -30,7 +30,9 @@ When a friend has a newer version than you, PriceShare tells you in chat.
 
 ## Linking up with friends
 
-You need to be on the same realm and faction, and linked one of these ways:
+You need the same faction and a realm that shares your Auction House (on Forever, realms of
+one cluster and type do, e.g. CAMWOW EU4 Realm 6 PvP and Realm 8 PvP), and be linked one of
+these ways:
 
 - Battle.net friends, or in the same guild: automatic.
 - In-game friends: **both** of you need the other on your friends list.
