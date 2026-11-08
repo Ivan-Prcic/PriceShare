@@ -30,17 +30,18 @@ When a friend has a newer version than you, PriceShare tells you in chat.
 
 ## Linking up with friends
 
-You need the same faction and a realm that shares your Auction House (on Forever, realms of
-one cluster and type do, e.g. CAMWOW EU4 Realm 6 PvP and Realm 8 PvP), and be linked one of
-these ways:
+Prices are shared between friends of the same faction on the same Auction House. On WoW Forever
+all CAMWOW EU PvP realms share one (EU4 and EU5 checked in game); PvE realms are kept apart.
 
-- Battle.net friends, or in the same guild: automatic.
-- In-game friends: **both** of you need the other on your friends list.
-- Invite each other to a group once: you stay linked after that.
-- Friends of friends find each other through the friend they share.
+- **Battle.net friends:** automatic, on any realm. New or newly online friends are greeted right away.
+- **Same guild, or in a group together once:** automatic, and you stay linked after that.
+- **In-game friends:** automatic when **both** of you have the other on your friends list.
+- **Friends of friends** find each other through the friend they share.
 - Otherwise: one of you types `/ps ping Name`. The other sees
   *"Name runs PriceShare and wants to share prices"* and types the `/ps add Name` it shows.
-  You're linked from then on.
+
+Friends on another Auction House still show in `/ps friends`, marked "other Auction House";
+their prices are never mixed into yours.
 
 `/ps check` shows what PriceShare sees, and `/ps ping Name` tests one person.
 

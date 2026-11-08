@@ -28,7 +28,7 @@ ns.FRESH = FRESH
 -- not read from PriceShare.toc: WoW reads .toc files only when the game starts, so after
 -- an update and a /reload the .toc would still report the old version.
 -- (Keep "## Version" in PriceShare.toc the same; Update-PriceShare.bat reads that one.)
-ns.VERSION = "1.4"
+ns.VERSION = "1.5"
 ns.UPDATE_HOW = "double-click Update-PriceShare.bat in Interface\\AddOns\\PriceShare, then /reload"
 
 -- true when version a is newer than b ("1.10" > "1.9")
@@ -165,14 +165,15 @@ ns.MyRealm = MyRealm
 local function Squash(s)
   return (tostring(s or ""):gsub("[%s%-']", ""):lower())
 end
--- Realms that share one Auction House. On Forever, realms of one cluster and type do
--- ("CAMWOWEU4Realm6PvP" and "CAMWOWEU4Realm8PvP" -> "camwoweu4|pvp"; checked in game:
--- the same listings on both). Other names: just the realm itself.
+-- Realms that share one Auction House. On Forever the clusters share one: checked in game
+-- (2026-11-08), CAMWOW EU4 Realm 6, EU4 Realm 8 and EU5 Realm 2 PvP all see the same
+-- listings. So "CAMWOWEU4Realm6PvP" and "CAMWOWEU5Realm2PvP" -> "camwoweu|pvp". PvE realms
+-- stay apart until someone confirms they share it too. Other names: the realm itself.
 function ns.AHGroup(realm)
   local r = Squash(realm)
-  local cluster, kind = r:match("^(.-)realm%d+(.*)$")
-  if cluster and cluster ~= "" then
-    return cluster .. "|" .. kind
+  local server, kind = r:match("^(%a+)%d*realm%d+(.*)$")
+  if server and server ~= "" then
+    return server .. "|" .. kind
   end
   return r
 end

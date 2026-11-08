@@ -272,19 +272,20 @@ local function Sweep()
     local acc = getBN(i)
     local g = acc and acc.gameAccountInfo
     if g and g.isOnline and g.clientProgram == (BNET_CLIENT_WOW or "WoW") and g.characterName and g.characterName ~= "" then
-      local realm = g.realmName and (g.realmName:gsub("[%s%-]", "")) or ""
-      local name = ns.Norm(g.characterName:find("-", 1, true) and g.characterName
-        or (realm ~= "" and (g.characterName .. "-" .. realm) or g.characterName))
+      -- Keyed and whispered by plain name: on Forever whispers reach other realms that way
+      -- (checked in game, EU4 -> EU5), and arrive without a realm. The realm only decides the
+      -- market, which hellos carry anyway.
+      local name = ns.Norm((g.characterName:gsub("%-.*$", "")))
       local why
       if WOW_PROJECT_ID and g.wowProjectID and g.wowProjectID ~= WOW_PROJECT_ID then
         why = "plays another WoW version"
       elseif g.factionName and g.factionName ~= UnitFactionGroup("player") then
         why = "other faction (" .. tostring(g.factionName) .. ")"
-      elseif not name or not ns.SameRealmGroup(name) then
-        why = "other realm (" .. tostring(g.realmName) .. ")"
       end
-      bnetSeen[#bnetSeen + 1] = { name = name or g.characterName, why = why }
-      if not why then
+      local market = g.realmName and ns.AHGroup(g.realmName)
+      bnetSeen[#bnetSeen + 1] = { name = name or g.characterName, why = why, realm = g.realmName,
+        other = market and market ~= ns.AHGroup(ns.MyRealm()) }
+      if name and not why then
         social[name] = "bnet"
         whisper[name] = true
       end
@@ -371,7 +372,7 @@ end
 local function HelloFor(code, query)
   local store = ns.Store(code)
   return table.concat({ "H", PROTO, code, E36(store and store.t or 0), E36(store and store.n or 0),
-    query and "q" or "-", store and store.by or "", ns.VERSION }, "^")
+    query and "q" or "-", store and store.by or "", ns.VERSION, ns.AHGroup(ns.MyRealm()) }, "^")
 end
 
 local function HelloMessages(query)
@@ -442,7 +443,21 @@ local function Gossip(who)
     return
   end
   gossiped[who] = true
-  local names = OnlinePeers(who)
+  -- only introduce friends on the same Auction House to each other
+  local mine = ns.AHGroup(ns.MyRealm())
+  local function SameMarket(name)
+    local m = ns.Peers()[name] and ns.Peers()[name].market
+    return not m or m == mine
+  end
+  if not SameMarket(who) then
+    return
+  end
+  local names = {}
+  for _, name in ipairs(OnlinePeers(who)) do
+    if SameMarket(name) then
+      names[#names + 1] = name
+    end
+  end
   local msg = "P"
   for _, name in ipairs(names) do
     if #msg + 1 + #name > MAX_MSG then
@@ -535,6 +550,10 @@ local function OnStart(who, f)
     return
   end
   r.T, r.mode, r.count, r.nmsg, r.by = T, f[4] == "d" and "d" or "f", D36(f[5]), D36(f[6]), f[7] ~= "" and f[7] or who
+  if f[9] and f[9] ~= "" and f[9] ~= ns.AHGroup(ns.MyRealm()) then
+    FailRequest(code, "their prices are from another Auction House", 3600)
+    return
+  end
   r.kind = f[8] == "q" and "quick" or "full"
   r.items, r.gone, r.seen, r.got = {}, {}, {}, 0
   r.last = GetTime()
@@ -718,6 +737,11 @@ local function OnRequest(who, f)
   if not MARKETS[code] then
     return
   end
+  local theirs = ns.Peers()[who] and ns.Peers()[who].market
+  if theirs and theirs ~= ns.AHGroup(ns.MyRealm()) then
+    Queue("B^" .. code, "WHISPER", who) -- another Auction House: our prices would mislead them
+    return
+  end
   local busy = #streams >= MAX_STREAMS
   for _, s in ipairs(streams) do
     if s.target == who then
@@ -730,7 +754,7 @@ local function OnRequest(who, f)
   end
   local msgs, mode, count, seq = BuildStream(store, code, X)
   Queue(table.concat({ "S", code, E36(store.t), mode, E36(count), E36(seq), store.by or "",
-    store.kind == "quick" and "q" or "f" }, "^"), "WHISPER", who)
+    store.kind == "quick" and "q" or "f", ns.AHGroup(ns.MyRealm()) }, "^"), "WHISPER", who)
   streams[#streams + 1] = { target = who, msgs = msgs, i = 1, market = code }
   lastBuilt[who] = { code = code, T = store.t, msgs = msgs, at = GetTime() }
   ns.Debug(string.format("sending %s %d entries (%d messages) to %s", mode == "d" and "changes:" or "everything:",
@@ -781,11 +805,21 @@ local function OnHello(who, f, channel)
     ns.Print(string.format("|cffffd040Update available:|r %s has PriceShare %s, you have %s. To update: %s.",
       ns.Short(who), version, ns.VERSION, ns.UPDATE_HOW))
   end
-  known[code] = known[code] or {}
-  known[code][who] = { t = T, n = n }
   if f[6] == "q" then
     ReplyHello(who)
   end
+  -- Their Auction House (copies before 1.5 don't say: taken as the same one).
+  local market = f[9] ~= "" and f[9] or nil
+  ns.Peers()[who].market = market
+  if market and market ~= ns.AHGroup(ns.MyRealm()) then
+    if known[code] then
+      known[code][who] = nil
+    end
+    ns.Log("   %s is on another Auction House (%s): linked, but no prices shared", who, market)
+    return
+  end
+  known[code] = known[code] or {}
+  known[code][who] = { t = T, n = n }
   local store = ns.Store(code)
   if T > (store and store.t or 0) and T <= ns.Now() + 600 then
     Sync.Want(code)
@@ -1005,7 +1039,8 @@ function Sync.LogSocial()
     end
   end
   for _, b in ipairs(bnetSeen) do
-    ns.Log("   bnet in WoW: %s %s", tostring(b.name), b.why and ("NOT USED: " .. b.why) or "used")
+    ns.Log("   bnet in WoW: %s on %s %s", tostring(b.name), tostring(b.realm),
+      b.why and ("NOT USED: " .. b.why) or (b.other and "used (other market)" or "used"))
   end
   local list = {}
   for name in pairs(whisper) do
@@ -1095,7 +1130,8 @@ local function Check()
   print("   Friends list: " .. List(friends))
   local bn = {}
   for _, b in ipairs(bnetSeen) do
-    bn[#bn + 1] = ns.Short(b.name) .. (b.why and (" (not used: " .. b.why .. ")") or "")
+    bn[#bn + 1] = ns.Short(b.name) .. (b.why and (" (not used: " .. b.why .. ")")
+      or (b.other and (" (" .. tostring(b.realm) .. ": other Auction House, no prices shared)") or ""))
   end
   print("   Battle.net friends in WoW: " .. List(bn))
   local linked = {}
@@ -1168,6 +1204,9 @@ function Sync.Command(cmd, rest)
         if list[name] and list[name].t > 0 then
           parts[#parts + 1] = string.format("%s prices from %s", ns.MARKET_NAMES[code] or code, ns.Ago(ns.Now() - list[name].t))
         end
+      end
+      if p.market and p.market ~= ns.AHGroup(ns.MyRealm()) then
+        state = state .. ", |cffff8040other Auction House: no prices shared|r"
       end
       print(string.format("   %s - %s, version %s, found via %s%s", ns.Short(name), state, p.version or "?", p.via or "?",
         #parts > 0 and (", " .. table.concat(parts, ", ")) or ""))
@@ -1249,9 +1288,34 @@ local function OnGroupChanged()
   end)
 end
 
+-- A friend came online, or a new friend was added: say hello to whoever we haven't yet
+-- (people who don't run PriceShare get one hello per session; they never see it).
+local friendCheckPending = false
+local function OnFriendsChanged()
+  if friendCheckPending or not ns.db or not DB().share or not ns.me then
+    return
+  end
+  friendCheckPending = true
+  C_Timer.After(5, ns.Guard("friend hello", function()
+    friendCheckPending = false
+    local t = GetTime()
+    for name in pairs(Sweep()) do
+      if not ns.IsMe(name) and not DB().blocked[name] and social[name] ~= "guild" and not pinged[name] then
+        pinged[name] = t
+        offline[name] = nil
+        ns.Log("new or newly online friend: %s", name)
+        HelloTo(name, true)
+      end
+    end
+  end))
+end
+
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("CHAT_MSG_ADDON")
 frame:RegisterEvent("GROUP_ROSTER_UPDATE")
+for _, event in ipairs({ "BN_FRIEND_ACCOUNT_ONLINE", "BN_FRIEND_INFO_CHANGED", "FRIENDLIST_UPDATE" }) do
+  pcall(frame.RegisterEvent, frame, event) -- (an event this client doesn't have is skipped)
+end
 local otherPrefixes = {} -- addon messages of other addons seen: proves messages arrive at all
 frame:SetScript("OnEvent", ns.Guard("sync events", function(_, event, prefix, text, channel, sender)
   if event == "CHAT_MSG_ADDON" then
@@ -1267,6 +1331,8 @@ frame:SetScript("OnEvent", ns.Guard("sync events", function(_, event, prefix, te
   elseif event == "GROUP_ROSTER_UPDATE" then
     ns.Log("group changed: %d members", (GetNumGroupMembers and GetNumGroupMembers()) or 0)
     OnGroupChanged()
+  else
+    OnFriendsChanged()
   end
 end))
 frame:SetScript("OnUpdate", ns.Guard("sending", function()
