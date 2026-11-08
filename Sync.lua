@@ -150,6 +150,7 @@ function Sync.MarkOffline(name)
   if not name then
     return
   end
+  ns.Log("marked offline: %s", name)
   offline[name] = true
   online[name] = nil
   DropStreamsTo(name)
@@ -169,6 +170,11 @@ end
 local function SendNow(item)
   local target = item.target and ns.WhisperName(item.target)
   local ok, res = pcall(C_ChatInfo.SendAddonMessage, PREFIX, item.msg, item.chat, target)
+  -- transfer data (D) would flood the log; everything else is kept
+  if item.msg:sub(1, 1) ~= "D" then
+    ns.Log("send %s %s: %s -> %s%s", item.chat, tostring(target), item.msg:sub(1, 40), tostring(res),
+      ok and "" or " (Lua error)")
+  end
   if not ok then
     ns.Debug("send failed: " .. tostring(res))
     return nil
@@ -313,7 +319,25 @@ local function Trusted(who, channel)
   if not social[who] and GetTime() - lastSweep > 5 then
     Sweep() -- they may have come online since the last check
   end
-  return social[who] ~= nil or InGroupWith(who)
+  if social[who] ~= nil or InGroupWith(who) then
+    return true
+  end
+  -- Forever names can be "First Last" while a friends list or Battle.net shows only "First"
+  -- (or the other way round): the first name decides.
+  local first = ns.FirstName(who)
+  if first then
+    for name in pairs(social) do
+      if social[name] ~= "guild" and ns.FirstName(name) == first and ns.SameRealmGroup(name) then
+        return true
+      end
+    end
+    for name in pairs(ns.Peers()) do
+      if ns.FirstName(name) == first then
+        return true
+      end
+    end
+  end
+  return false
 end
 
 local function Touch(who, channel)
@@ -783,23 +807,32 @@ local function OnPeers(who, f)
 end
 
 local function OnMessage(text, channel, sender)
-  if ns.Unreadable(text, sender) or type(text) ~= "string" or not DB().share then
-    return
-  end
-  local who = ns.Norm(sender)
-  if not who or ns.IsMe(who) then
+  if ns.Unreadable(text, sender) or type(text) ~= "string" then
+    ns.Log("recv %s: unreadable (hidden by the game)", tostring(channel))
     return
   end
   local kind = text:sub(1, 1)
+  local who = ns.Norm(sender)
+  if kind ~= "D" then
+    ns.Log("recv %s from %s (=%s): %s", tostring(channel), tostring(sender), tostring(who), text:sub(1, 40))
+  end
+  if not DB().share then
+    return
+  end
+  if not who or ns.IsMe(who) then
+    return
+  end
   local h = heard[who] or { n = 0 }
   heard[who] = h
   h.n, h.last, h.channel = h.n + 1, GetTime(), channel
   if not ns.SameRealmGroup(who) then
     h.ignored = "other realm"
+    ns.Log("   ignored: %s is on another realm", who)
     return
   end
   if not Trusted(who, channel) then
     h.ignored = "not linked"
+    ns.Log("   ignored: %s isn't linked (social=%s)", who, tostring(social[who]))
     ns.Debug("ignored a message from " .. tostring(who) .. " (not a friend, guild or group member)")
     if kind == "H" and not h.told and not DB().blocked[who] then
       h.told = true
@@ -883,6 +916,7 @@ local function InstallErrorFilter()
     if not t or GetTime() - t > ERR_WINDOW then
       return false
     end
+    ns.Log("game: \"%s\" (our whisper to %s %d s ago)", msg, name, math.floor(GetTime() - t))
     if not (online[name] and online[name] > t) then
       Sync.MarkOffline(name)
     end
@@ -897,17 +931,21 @@ end
 
 function Sync.Start()
   if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
-    C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
+    local res = C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
+    ns.Log("prefix %s registered: %s", PREFIX, tostring(res))
+  else
+    ns.Log("no C_ChatInfo.RegisterAddonMessagePrefix on this client")
   end
   InstallErrorFilter()
   if C_GuildInfo and C_GuildInfo.GuildRoster and IsInGuild and IsInGuild() then
     C_GuildInfo.GuildRoster()
   end
-  C_Timer.After(LOGIN_DELAY, function()
+  C_Timer.After(LOGIN_DELAY, ns.Guard("login hello", function()
+    Sync.LogSocial()
     Sync.Announce(true)
-  end)
+  end))
   if C_Timer.NewTicker then
-    C_Timer.NewTicker(5, function()
+    C_Timer.NewTicker(5, ns.Guard("sync timer", function()
       for code, r in pairs(req) do
         if GetTime() - r.last > STREAM_TIMEOUT then
           -- the end marker may be what got lost: ask for what's missing first
@@ -927,8 +965,42 @@ function Sync.Start()
           end
         end
       end
-    end)
+    end))
   end
+end
+
+-- What the game says about your friends, for the log (raw values, to spot name/realm mismatches).
+function Sync.LogSocial()
+  local whisper = Sweep()
+  local n = C_FriendList and C_FriendList.GetNumFriends and C_FriendList.GetNumFriends() or 0
+  ns.Log("friends list: %d", n)
+  for i = 1, math.min(n, 30) do
+    local info = C_FriendList.GetFriendInfoByIndex(i)
+    if info then
+      ns.Log("   friend name=%s connected=%s -> %s", tostring(info.name), tostring(info.connected), tostring(ns.Norm(info.name)))
+    end
+  end
+  local numBN = BNGetNumFriends and BNGetNumFriends()
+  ns.Log("battle.net friends: %s (BNGetNumFriends %s, C_BattleNet %s)", tostring(numBN), BNGetNumFriends and "yes" or "MISSING",
+    (C_BattleNet and C_BattleNet.GetFriendAccountInfo) and "yes" or "MISSING")
+  local getBN = C_BattleNet and C_BattleNet.GetFriendAccountInfo
+  for i = 1, math.min(numBN or 0, 60) do
+    local acc = getBN and getBN(i)
+    local g = acc and acc.gameAccountInfo
+    if g and g.isOnline then
+      ns.Log("   bnet online: client=%s project=%s (ours %s) char=%s realm=%s realmDisplay=%s realmID=%s faction=%s",
+        tostring(g.clientProgram), tostring(g.wowProjectID), tostring(WOW_PROJECT_ID), tostring(g.characterName),
+        tostring(g.realmName), tostring(g.realmDisplayName), tostring(g.realmID), tostring(g.factionName))
+    end
+  end
+  for _, b in ipairs(bnetSeen) do
+    ns.Log("   bnet in WoW: %s %s", tostring(b.name), b.why and ("NOT USED: " .. b.why) or "used")
+  end
+  local list = {}
+  for name in pairs(whisper) do
+    list[#list + 1] = name
+  end
+  ns.Log("will whisper hellos to: %s", #list > 0 and table.concat(list, ", ") or "nobody")
 end
 
 ---------------------------------------------------------------------------
@@ -980,6 +1052,7 @@ end
 
 -- Everything that decides who you share with, for when two people don't link up.
 local function Check()
+  Sync.LogSocial()
   local whisper = Sweep()
   ns.Print("check")
   print(string.format("   You are \"%s\" on realm %s, %s. Friends must be on the same realm and faction.",
@@ -1153,15 +1226,25 @@ end
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("CHAT_MSG_ADDON")
 frame:RegisterEvent("GROUP_ROSTER_UPDATE")
-frame:SetScript("OnEvent", function(_, event, prefix, text, channel, sender)
-  if event == "CHAT_MSG_ADDON" and prefix == PREFIX then
-    OnMessage(text, channel, sender)
+local otherPrefixes = {} -- addon messages of other addons seen: proves messages arrive at all
+frame:SetScript("OnEvent", ns.Guard("sync events", function(_, event, prefix, text, channel, sender)
+  if event == "CHAT_MSG_ADDON" then
+    if prefix == PREFIX then
+      OnMessage(text, channel, sender)
+    elseif type(prefix) == "string" and not ns.Unreadable(prefix, channel) then
+      local key = prefix .. " via " .. tostring(channel)
+      if not otherPrefixes[key] then
+        otherPrefixes[key] = true
+        ns.Log("other addon's message seen: %s", key)
+      end
+    end
   elseif event == "GROUP_ROSTER_UPDATE" then
+    ns.Log("group changed: %d members", (GetNumGroupMembers and GetNumGroupMembers()) or 0)
     OnGroupChanged()
   end
-end)
-frame:SetScript("OnUpdate", function()
+end))
+frame:SetScript("OnUpdate", ns.Guard("sending", function()
   if ns.db and (#control > 0 or #streams > 0) then
     Pump()
   end
-end)
+end))

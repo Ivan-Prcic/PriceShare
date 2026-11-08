@@ -55,3 +55,10 @@ You need to be on the same realm and faction, and linked one of these ways:
 | `/ps add Name` / `remove` / `block` / `unblock` | manage who you share with |
 | `/ps check`, `/ps ping Name` | find out why someone isn't linked |
 | `/ps share on\|off`, `/ps tooltip on\|off`, `/ps chat on\|off` | settings |
+
+## Still not linking?
+
+PriceShare keeps a diagnostic log of the last 400 hellos, replies and game errors (no prices,
+nothing is sent anywhere). `/ps log` shows the end of it. After a `/reload` it's saved in
+`World of Warcraft\_forever_\WTF\Account\<your account>\SavedVariables\PriceShare.lua`:
+send that file to whoever is helping you.

@@ -69,6 +69,41 @@ function ns.Debug(msg)
   end
 end
 
+-- Diagnostic log, kept in the saved data (WTF\...\SavedVariables\PriceShare.lua) so a
+-- problem can be looked at after a /reload. Last LOG_MAX lines; nothing is sent anywhere.
+local LOG_MAX = 400
+function ns.Log(fmt, ...)
+  local db = ns.db
+  if not db or db.log == false then
+    return
+  end
+  db.logLines = db.logLines or {}
+  local ok, text = pcall(string.format, fmt, ...)
+  if not ok then
+    text = tostring(fmt)
+  end
+  local lines = db.logLines
+  lines[#lines + 1] = date("%m-%d %H:%M:%S ") .. text
+  while #lines > LOG_MAX do
+    table.remove(lines, 1)
+  end
+end
+
+-- Runs fn and logs any Lua error instead of losing it (WoW hides errors by default).
+local errorsShown = 0
+function ns.Guard(where, fn)
+  return function(...)
+    local ok, err = pcall(fn, ...)
+    if not ok then
+      ns.Log("ERROR in %s: %s", where, tostring(err))
+      if errorsShown < 3 then
+        errorsShown = errorsShown + 1
+        print("|cffff4040PriceShare error|r (" .. where .. "): " .. tostring(err))
+      end
+    end
+  end
+end
+
 local function Money(c)
   c = math.floor((c or 0) + 0.5)
   local g, s, k = math.floor(c / 10000), math.floor(c / 100) % 100, c % 100
@@ -124,6 +159,20 @@ local function MyRealm()
 end
 ns.MyRealm = MyRealm
 
+-- Any spelling of your own realm: "CAMWOWEU4Realm6PvP", the display name, any letter case.
+local function Squash(s)
+  return (tostring(s or ""):gsub("[%s%-']", ""):lower())
+end
+function ns.IsMyRealm(realm)
+  local r = Squash(realm)
+  return r ~= "" and (r == Squash(MyRealm()) or r == Squash(GetRealmName and GetRealmName()))
+end
+
+-- First word of a name, lower case: "Zakstor Wildroot-Realm" -> "zakstor"
+function ns.FirstName(name)
+  return type(name) == "string" and (name:match("^(%S+)") or name):gsub("%-.*$", ""):lower() or nil
+end
+
 -- "bob", "Bob" and "BOB-Realm" are the same person: names get a capital first
 -- letter per word (the game's spelling), realm added when missing.
 function ns.Norm(name)
@@ -137,7 +186,7 @@ function ns.Norm(name)
   local base, realm = name:match("^(.-)%-([^%-]+)$")
   if not base or base == "" then
     base, realm = name, MyRealm()
-  elseif realm:lower() == MyRealm():lower() then
+  elseif ns.IsMyRealm(realm) then
     realm = MyRealm()
   end
   base = base:gsub("(%S)(%S*)", function(first, rest)
@@ -177,7 +226,7 @@ end
 -- Your realm or a realm connected to it (same Auction House).
 function ns.SameRealmGroup(name)
   local realm = type(name) == "string" and name:match("%-([^%-]+)$")
-  if not realm or realm == MyRealm() then
+  if not realm or realm == MyRealm() or ns.IsMyRealm(realm) then
     return true
   end
   local connected = (C_AutoComplete and C_AutoComplete.GetAutoCompleteRealms) or GetAutoCompleteRealms
@@ -731,6 +780,21 @@ SlashCmdList.PRICESHARE = function(msg)
   elseif cmd == "debug" then
     db.debug = OnOff(arg, db.debug)
     Print("Debug messages: " .. (db.debug and "on" or "off") .. ".")
+  elseif cmd == "log" then
+    if arg == "clear" then
+      db.logLines = {}
+      Print("Log cleared.")
+    elseif arg == "on" or arg == "off" then
+      db.log = arg == "on"
+      Print("Diagnostic log: " .. arg .. ".")
+    else
+      local lines = db.logLines or {}
+      Print(string.format("last lines of the diagnostic log (%d kept; saved to the PriceShare file in " ..
+        "WTF\\Account\\...\\SavedVariables on /reload or logout):", #lines))
+      for i = math.max(1, #lines - 14), #lines do
+        print("   " .. lines[i])
+      end
+    end
   elseif cmd == "share" then
     db.share = OnOff(arg, db.share)
     Print("Sharing prices with friends: " .. (db.share and "on" or "off") .. ".")
@@ -754,7 +818,7 @@ events:RegisterEvent("AUCTION_HOUSE_SHOW")
 events:RegisterEvent("AUCTION_HOUSE_CLOSED")
 events:RegisterEvent("REPLICATE_ITEM_LIST_UPDATE")
 
-events:SetScript("OnUpdate", function()
+events:SetScript("OnUpdate", ns.Guard("scan reading", function()
   if not scan.worker then
     return
   end
@@ -766,9 +830,9 @@ events:SetScript("OnUpdate", function()
   elseif coroutine.status(scan.worker) == "dead" then
     scan.worker = nil
   end
-end)
+end))
 
-events:SetScript("OnEvent", function(_, event, ...)
+events:SetScript("OnEvent", ns.Guard("core events", function(_, event, ...)
   if event == "ADDON_LOADED" then
     if ... == "PriceShare" then
       InitDB()
@@ -779,6 +843,9 @@ events:SetScript("OnEvent", function(_, event, ...)
     local name = (GetUnitName and GetUnitName("player", true)) or UnitName("player")
     ns.me = ns.Norm(name)
     ns.meShort = ns.Norm(UnitName("player"))
+    ns.Log("=== login: PriceShare %s, me=%s (GetUnitName=%s, UnitName=%s), realm=%s (GetRealmName=%s), faction=%s, guild=%s",
+      ns.VERSION, tostring(ns.me), tostring(name), tostring(UnitName("player")), MyRealm(), tostring(GetRealmName()),
+      tostring(UnitFactionGroup("player")), tostring(IsInGuild and IsInGuild()))
     if ns.Sync then
       ns.Sync.Start()
     end
@@ -804,4 +871,4 @@ events:SetScript("OnEvent", function(_, event, ...)
   elseif event == "REPLICATE_ITEM_LIST_UPDATE" then
     OnReplicateReady()
   end
-end)
+end))

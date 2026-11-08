@@ -282,7 +282,7 @@ frame:RegisterEvent("AUCTION_HOUSE_SHOW")
 frame:RegisterEvent("AUCTION_HOUSE_CLOSED")
 frame:RegisterEvent("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
 frame:RegisterEvent("AUCTION_HOUSE_BROWSE_RESULTS_ADDED")
-frame:SetScript("OnEvent", function(_, event, ...)
+frame:SetScript("OnEvent", ns.Guard("quick scan events", function(_, event, ...)
   if event == "AUCTION_HOUSE_SHOW" then
     if AuctionHouseFrame then
       Quick.CreateButtons()
@@ -297,7 +297,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
   else
     OnBrowse(event, ...)
   end
-end)
+end))
 
 C_Timer.NewTicker(2, function()
   if q.active and GetTime() - q.last > TIMEOUT then
