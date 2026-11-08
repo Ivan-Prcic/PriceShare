@@ -461,7 +461,7 @@ local function Gossip(who)
 end
 
 local function ReplyHello(who)
-  if replied[who] and GetTime() - replied[who] < 30 then
+  if replied[who] and GetTime() - replied[who] < 5 then
     return
   end
   replied[who] = GetTime()
@@ -842,9 +842,20 @@ local function OnMessage(text, channel, sender)
     return
   end
   h.ignored = nil
-  if pingWatch[who] and kind == "H" then
-    pingWatch[who] = nil
-    ns.Print(ns.Short(who) .. " answered: PriceShare is working between you.")
+  if kind == "H" then
+    -- the ping may have used the first name only ("Zakstor" for "Zakstor Wildroot")
+    local pinged = pingWatch[who] and who
+    if not pinged then
+      for name in pairs(pingWatch) do
+        if ns.FirstName(name) == ns.FirstName(who) then
+          pinged = name
+        end
+      end
+    end
+    if pinged then
+      pingWatch[pinged] = nil
+      ns.Print(ns.Short(who) .. " answered: PriceShare is working between you.")
+    end
   end
   local f = Split(text)
   if kind == "H" then
@@ -1105,6 +1116,20 @@ local function Ping(rest)
   if not name then
     ns.Print("Usage: /ps ping Name")
     return
+  end
+  -- "Zakstor" for a known "Zakstor Wildroot": ping the full name
+  if not ns.Peers()[name] and not social[name] then
+    local first = ns.FirstName(name)
+    for known in pairs(ns.Peers()) do
+      if ns.FirstName(known) == first and #known > #name then
+        name = known
+      end
+    end
+    for known in pairs(social) do
+      if ns.FirstName(known) == first and #known > #name then
+        name = known
+      end
+    end
   end
   offline[name] = nil
   local started = GetTime()
