@@ -84,7 +84,8 @@ local stats = { sent = 0, got = 0 }
 local bnetSeen = {}    -- Battle.net friends in WoW at the last check: { name, why not used }
 local heard = {}       -- [name] = { n = messages, last = GetTime(), channel, ignored = true/nil }
 local results = {}     -- [send result code] = count
-local pingWatch = {}   -- [name] = GetTime() of a /ps ping
+local pingWatch = {}   -- [name] = GetTime() of a /ps ping (answers from them are accepted)
+local pingFailed = {}  -- [name] = GetTime() a ping got no answer (the game's "not online" may follow)
 
 local function DB()
   return ns.db
@@ -166,7 +167,8 @@ function Sync.MarkOffline(name)
 end
 
 local function SendNow(item)
-  local ok, res = pcall(C_ChatInfo.SendAddonMessage, PREFIX, item.msg, item.chat, item.target)
+  local target = item.target and ns.WhisperName(item.target)
+  local ok, res = pcall(C_ChatInfo.SendAddonMessage, PREFIX, item.msg, item.chat, target)
   if not ok then
     ns.Debug("send failed: " .. tostring(res))
     return nil
@@ -305,8 +307,8 @@ local function Trusted(who, channel)
   if channel == "GUILD" or channel == "PARTY" or channel == "RAID" or channel == "INSTANCE_CHAT" then
     return true
   end
-  if ns.Peers()[who] or introduced[who] then
-    return true
+  if ns.Peers()[who] or introduced[who] or pingWatch[who] or pingFailed[who] then
+    return true -- (someone you pinged by name this session counts as linked)
   end
   if not social[who] and GetTime() - lastSweep > 5 then
     Sweep() -- they may have come online since the last check
@@ -785,18 +787,24 @@ local function OnMessage(text, channel, sender)
     return
   end
   local who = ns.Norm(sender)
-  if not who or ns.IsMe(who) or not ns.SameRealmGroup(who) then
+  if not who or ns.IsMe(who) then
     return
   end
   local kind = text:sub(1, 1)
   local h = heard[who] or { n = 0 }
   heard[who] = h
   h.n, h.last, h.channel = h.n + 1, GetTime(), channel
+  if not ns.SameRealmGroup(who) then
+    h.ignored = "other realm"
+    return
+  end
   if not Trusted(who, channel) then
-    h.ignored = true
+    h.ignored = "not linked"
     ns.Debug("ignored a message from " .. tostring(who) .. " (not a friend, guild or group member)")
-    if pingWatch[who] then
-      ns.Print(ns.Short(who) .. " answered, but isn't linked to you, so it's ignored. /ps add " .. ns.Short(who) .. " fixes that.")
+    if kind == "H" and not h.told and not DB().blocked[who] then
+      h.told = true
+      ns.Print(string.format("|cffffd040%s runs PriceShare and wants to share prices,|r but you aren't linked. " ..
+        "To share with them, type:  /ps add %s", ns.Short(who), ns.Short(who)))
     end
     return
   end
@@ -877,6 +885,11 @@ local function InstallErrorFilter()
     end
     if not (online[name] and online[name] > t) then
       Sync.MarkOffline(name)
+    end
+    if pingWatch[name] or (pingFailed[name] and GetTime() - pingFailed[name] < ERR_WINDOW) then
+      -- a /ps ping: this is the answer they want to see
+      ns.Print("ping: the game says " .. ns.Short(name) .. " isn't online. Check the exact character name (/ps check lists your friends).")
+      return true
     end
     return true -- our addon whisper to someone offline: hide the error
   end)
@@ -1008,7 +1021,7 @@ local function Check()
   local got = {}
   for name, h in pairs(heard) do
     got[#got + 1] = string.format("%s via %s, %s%s", ns.Short(name), tostring(h.channel):lower(),
-      ns.Ago(GetTime() - h.last), h.ignored and " |cffff8040IGNORED: not linked|r" or "")
+      ns.Ago(GetTime() - h.last), h.ignored and (" |cffff8040IGNORED: " .. h.ignored .. "|r") or "")
   end
   print("   PriceShare messages received this session: " .. List(got, 10))
   print("   To test one person: /ps ping Name (they must be online and have PriceShare).")
@@ -1029,13 +1042,10 @@ local function Ping(rest)
   C_Timer.After(15, function()
     if pingWatch[name] == started then
       pingWatch[name] = nil
-      local h = heard[name]
-      if h and h.ignored and h.last >= started then
-        return -- they answered and it was explained then
-      end
-      ns.Print(string.format("No answer from %s in 15 s. Either they're offline, don't have PriceShare loaded, " ..
-        "or haven't linked you: ask them to type  /ps add %s  (or invite each other to a group once).",
-        ns.Short(name), ns.Short(ns.me)))
+      pingFailed[name] = GetTime()
+      ns.Print(string.format("No answer from %s in 15 s. Most likely they haven't linked you: they should now see " ..
+        "\"%s runs PriceShare and wants to share\" and type  /ps add %s . If the name is wrong or they're " ..
+        "offline, the game says so within ~2 minutes.", ns.Short(name), ns.Short(ns.me), ns.Short(ns.me)))
     end
   end)
 end

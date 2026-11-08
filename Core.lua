@@ -124,12 +124,36 @@ local function MyRealm()
 end
 ns.MyRealm = MyRealm
 
+-- "bob", "Bob" and "BOB-Realm" are the same person: names get a capital first
+-- letter per word (the game's spelling), realm added when missing.
 function ns.Norm(name)
-  if type(name) ~= "string" or name == "" then
+  if type(name) ~= "string" then
     return nil
   end
-  if not name:find("-", 1, true) then
-    return name .. "-" .. MyRealm()
+  name = name:gsub("^%s+", ""):gsub("%s+$", "")
+  if name == "" then
+    return nil
+  end
+  local base, realm = name:match("^(.-)%-([^%-]+)$")
+  if not base or base == "" then
+    base, realm = name, MyRealm()
+  elseif realm:lower() == MyRealm():lower() then
+    realm = MyRealm()
+  end
+  base = base:gsub("(%S)(%S*)", function(first, rest)
+    return first:upper() .. rest:lower()
+  end)
+  return base .. "-" .. realm
+end
+
+-- Whisper target: plain name on your own realm (how other Forever addons do it).
+function ns.WhisperName(name)
+  if type(name) ~= "string" then
+    return name
+  end
+  local base, realm = name:match("^(.-)%-([^%-]+)$")
+  if base and realm == MyRealm() then
+    return base
   end
   return name
 end

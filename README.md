@@ -36,7 +36,9 @@ You need to be on the same realm and faction, and linked one of these ways:
 - In-game friends: **both** of you need the other on your friends list.
 - Invite each other to a group once: you stay linked after that.
 - Friends of friends find each other through the friend they share.
-- Otherwise: `/ps add Name` on **both** sides.
+- Otherwise: one of you types `/ps ping Name`. The other sees
+  *"Name runs PriceShare and wants to share prices"* and types the `/ps add Name` it shows.
+  You're linked from then on.
 
 `/ps check` shows what PriceShare sees, and `/ps ping Name` tests one person.
 
