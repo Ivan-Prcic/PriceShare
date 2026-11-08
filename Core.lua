@@ -24,9 +24,11 @@ local SALE_SHARE, SALE_MAX = 0.1, 20
 
 ns.FRESH = FRESH
 
--- This copy's version (from PriceShare.toc), told to friends so older copies know to update.
-local getMeta = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
-ns.VERSION = (getMeta and getMeta("PriceShare", "Version")) or "1.0"
+-- This copy's version, told to friends so older copies know to update. Kept here and
+-- not read from PriceShare.toc: WoW reads .toc files only when the game starts, so after
+-- an update and a /reload the .toc would still report the old version.
+-- (Keep "## Version" in PriceShare.toc the same; Update-PriceShare.bat reads that one.)
+ns.VERSION = "1.3.1"
 ns.UPDATE_HOW = "double-click Update-PriceShare.bat in Interface\\AddOns\\PriceShare, then /reload"
 
 -- true when version a is newer than b ("1.10" > "1.9")
