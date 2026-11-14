@@ -9,6 +9,9 @@ A light Auction House price addon for WoW Forever, shared with your friends.
   scan anyone has is passed around in the background, so not everyone has to scan.
 - **Tooltip.** Shows the cheapest price per item and what everything you have of it is worth,
   e.g. `20c each`, `Your 39: 7s 80c`.
+- **Price lookup.** Look up any item's price anywhere, even items you don't have, in a window laid
+  out like the Auction House's Buy tab. Open it with the minimap button, the **Price Lookup**
+  button above the Auction House, a key (Key Bindings > AddOns > PriceShare) or `/ps find`.
 
 Nothing is ever shown to other players. Everything goes through hidden addon messages.
 
@@ -26,7 +29,25 @@ Double-click **`Update-PriceShare.bat`** inside `Interface\AddOns\PriceShare`. I
 newest version over the old one. Then type `/reload` in game (it tells you if a full restart is
 needed instead).
 
-When a friend has a newer version than you, PriceShare tells you in chat.
+When a friend has a newer version than you, PriceShare reminds you in chat every 5 minutes (not
+during combat), with a sound, until you update. The sound is a Warcraft III Peon's "Work work."
+by default; pick another (or none) on the minimap button's right-click menu, or with `/ps sound`.
+
+## Price lookup
+
+- **Search** by name (any part of it, any order of words), paste or Shift-click an item into the
+  search box, or pick a category on the left.
+- **Columns:** how many are listed, the cheapest price, what it realistically sells for (where the
+  cheapest 10% of listed units end), and when its price last changed. Click a header to sort.
+- **Hover** a row for the item's tooltip, **Shift-click** to link it in chat, **Ctrl-click** to try
+  it on. Click it for details, including what yours are worth.
+- **Auction House** button: your faction's prices or the goblin one's (Booty Bay, Gadgetzan,
+  Everlook). **Filter**: only some rarities.
+- Items that sold out show as "none listed" when you search for them.
+
+The prices come from the newest scan anyone in your PriceShare group has. Scans carry item numbers
+only, so the first time you open the window it learns item names from the game in the background
+(the bottom line shows how far along it is). It keeps them, so after that searches are instant.
 
 ## Linking up with friends
 
@@ -50,6 +71,10 @@ their prices are never mixed into yours.
 | Command | What it does |
 | --- | --- |
 | `/ps` | status |
+| `/ps find [name]` | price lookup window (also the minimap button) |
+| `/ps minimap` | show or hide the minimap button |
+| `/ps sound [number]` | the update reminder's sound |
+| `/ps remind` | show the update reminder now |
 | `/ps scan` | Full Scan now (Auction House open, once per 15 min) |
 | `/ps quick` | Quick Scan: every search page, no 15 min wait |
 | `/ps auto on\|off` | Full Scan when you open the Auction House |

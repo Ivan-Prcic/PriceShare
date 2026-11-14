@@ -242,7 +242,7 @@ function Quick.CreateButtons()
     return
   end
   ui = CreateFrame("Frame", nil, AuctionHouseFrame)
-  ui:SetSize(420, 24)
+  ui:SetSize(540, 24)
   ui:SetPoint("BOTTOMRIGHT", AuctionHouseFrame, "TOPRIGHT", -4, 2)
   ui.quick = CreateFrame("Button", nil, ui, "UIPanelButtonTemplate")
   ui.quick:SetSize(104, 22)
@@ -260,8 +260,19 @@ function Quick.CreateButtons()
     UpdateButtons()
   end)
   Tip(ui.full, "Full Scan", "Every auction at once, with sale prices. The server allows one every 15 minutes. Shared with your friends.")
+  ui.lookup = CreateFrame("Button", nil, ui, "UIPanelButtonTemplate")
+  ui.lookup:SetSize(104, 22)
+  ui.lookup:SetPoint("RIGHT", ui.full, "LEFT", -4, 0)
+  ui.lookup:SetText("Price Lookup")
+  ui.lookup:SetScript("OnClick", function()
+    if ns.Lookup then
+      ns.Lookup.Toggle()
+    end
+  end)
+  Tip(ui.lookup, "Price Lookup", "Look up any item's price from the newest scan you or a friend has, without searching here. " ..
+    "Also on the minimap button, anywhere.")
   ui.label = ui:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  ui.label:SetPoint("RIGHT", ui.full, "LEFT", -8, 0)
+  ui.label:SetPoint("RIGHT", ui.lookup, "LEFT", -8, 0)
   ui.label:SetJustifyH("RIGHT")
   local elapsed = 0
   ui:SetScript("OnUpdate", function(_, dt)

@@ -800,10 +800,8 @@ local function OnHello(who, f, channel)
   Touch(who, channel)
   local version = f[8] ~= "" and f[8] or nil
   ns.Peers()[who].version = version or "1.0"
-  if version and ns.VersionNewer(version, ns.VERSION) and not versionNoted[version] then
-    versionNoted[version] = true
-    ns.Print(string.format("|cffffd040Update available:|r %s has PriceShare %s, you have %s. To update: %s.",
-      ns.Short(who), version, ns.VERSION, ns.UPDATE_HOW))
+  if version and ns.VersionNewer(version, ns.VERSION) then
+    ns.NoteNewerVersion(version, who) -- colored reminder now, then every 5 minutes (Core.lua)
   end
   if f[6] == "q" then
     ReplyHello(who)

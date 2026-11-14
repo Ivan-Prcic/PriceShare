@@ -28,8 +28,8 @@ ns.FRESH = FRESH
 -- not read from PriceShare.toc: WoW reads .toc files only when the game starts, so after
 -- an update and a /reload the .toc would still report the old version.
 -- (Keep "## Version" in PriceShare.toc the same; Update-PriceShare.bat reads that one.)
-ns.VERSION = "1.5"
-ns.UPDATE_HOW = "double-click Update-PriceShare.bat in Interface\\AddOns\\PriceShare, then /reload"
+ns.VERSION = "1.6"
+ns.UPDATE_HOW = "double-click Update-PriceShare.bat in Interface\\AddOns\\PriceShare, then restart WoW (or /reload, if it says that's enough)"
 
 -- true when version a is newer than b ("1.10" > "1.9")
 function ns.VersionNewer(a, b)
@@ -133,7 +133,8 @@ local function Ago(sec)
   elseif sec < 86400 then
     return math.floor(sec / 3600 + 0.5) .. " h ago"
   end
-  return math.floor(sec / 86400 + 0.5) .. " days ago"
+  local days = math.floor(sec / 86400 + 0.5)
+  return days .. (days == 1 and " day ago" or " days ago")
 end
 ns.Ago = Ago
 
@@ -676,6 +677,140 @@ local function HookTooltips()
 end
 
 ---------------------------------------------------------------------------
+-- Update reminders: once a friend runs a newer PriceShare, a colored chat reminder
+-- every 5 minutes (held back while you're in combat) with a sound, until you update.
+-- The sound is picked on the minimap button's right-click menu or with /ps sound.
+---------------------------------------------------------------------------
+local REMIND_EVERY = 5 * 60
+local REMIND_AFTER_LOGIN = 20 -- seconds, for an update already known from earlier sessions
+
+-- Voice lines from Warcraft III that the game ships (file IDs from its file list).
+-- One the game doesn't have (the Fel Reaver before The Burning Crusade) falls back to
+-- the raid warning sound.
+ns.SOUNDS = {
+  { key = "workwork", label = "Peon: \"Work work.\"", file = 558147 },
+  { key = "busy", label = "Peon: \"Me busy. Leave me alone!\"", file = 558144 },
+  { key = "whaaat", label = "Peon: \"Whaaat?\"", file = 558133 },
+  { key = "ready", label = "Peon: \"Ready to work.\"", file = 558137 },
+  { key = "what", label = "Peasant: \"What?\"", file = 558120 },
+  { key = "doh", label = "Peasant: \"D'oh!\"", file = 558122 },
+  { key = "felreaver", label = "Fel Reaver roar (if your game has it)", file = 594958 },
+  { key = "raidwarning", label = "Raid warning", kit = "RAID_WARNING", kitID = 8959 },
+  { key = "off", label = "No sound" },
+}
+local DEFAULT_SOUND = "workwork"
+
+local function SoundChoice(key)
+  for _, s in ipairs(ns.SOUNDS) do
+    if s.key == key then
+      return s
+    end
+  end
+end
+
+-- Plays a sound from the list (the chosen one by default). Returns false for "No sound".
+function ns.PlayReminderSound(key)
+  local s = SoundChoice(key or (db and db.remindSound) or DEFAULT_SOUND) or SoundChoice(DEFAULT_SOUND)
+  if s.key == "off" then
+    return false
+  end
+  if s.file and PlaySoundFile then
+    local ok, willPlay = pcall(PlaySoundFile, s.file, "Master")
+    if ok and willPlay then
+      return true
+    end
+  end
+  local kit = (SOUNDKIT and SOUNDKIT[s.kit or "RAID_WARNING"]) or s.kitID or 8959
+  if PlaySound then
+    pcall(PlaySound, kit, "Master")
+  end
+  return true
+end
+
+function ns.SetReminderSound(key)
+  local s = SoundChoice(key)
+  if not s or not db then
+    return false
+  end
+  db.remindSound = s.key
+  ns.PlayReminderSound(s.key) -- so you hear what you picked
+  return true
+end
+
+function ns.ReminderSoundLabel()
+  local s = SoundChoice(db and db.remindSound or DEFAULT_SOUND) or SoundChoice(DEFAULT_SOUND)
+  return s.label
+end
+
+local newest      -- { version, who }: the newest PriceShare a friend runs, when newer than yours
+local remindTicker
+local remindWaiting -- a reminder held back until combat ends
+local lastReminded = -REMIND_EVERY
+
+local function Remind(preview)
+  if not newest and not preview then
+    return
+  end
+  if InCombatLockdown and InCombatLockdown() and not preview then
+    remindWaiting = true
+    return
+  end
+  remindWaiting = false
+  if not preview then
+    lastReminded = GetTime()
+  end
+  local version = newest and newest.version or "?"
+  local who = newest and newest.who and ns.Short(newest.who) or "a friend"
+  print(string.format("|cff66ccffPriceShare|r: |cffff8000Update available!|r %s runs PriceShare |cff40ff40%s|r, " ..
+    "you have |cffff4040%s|r. Until you update, you may miss your friends' newest prices.", who, version, ns.VERSION))
+  print("   |cffffd040How to update:|r double-click |cffffffffUpdate-PriceShare.bat|r in |cffffffff" ..
+    "World of Warcraft\\_forever_\\Interface\\AddOns\\PriceShare|r (it downloads the new version), then |cffffffffrestart WoW|r. " ..
+    "|cff999999(Reminds you every 5 minutes. Sound: minimap button, right-click.)|r")
+  ns.PlayReminderSound()
+end
+
+-- A friend runs version (seen live, or saved from an earlier session).
+function ns.NoteNewerVersion(version, who, quietly)
+  if not ns.VersionNewer(version, ns.VERSION) then
+    return
+  end
+  if newest and not ns.VersionNewer(version, newest.version) then
+    return
+  end
+  local first = newest == nil
+  newest = { version = version, who = who }
+  ns.Log("newer PriceShare %s seen from %s", tostring(version), tostring(who))
+  if first then
+    if not quietly then
+      Remind()
+    end
+    if not remindTicker then
+      -- checked every minute, shown 5 minutes after the last one (a reminder held back
+      -- by combat and shown afterwards restarts the 5 minutes)
+      remindTicker = C_Timer.NewTicker(60, ns.Guard("update reminder", function()
+        if GetTime() - lastReminded >= REMIND_EVERY - 1 then
+          Remind()
+        end
+      end))
+    end
+  end
+end
+
+-- The newest version any linked friend ran last time you saw them.
+local function CheckSavedVersions()
+  local best, by
+  for name, p in pairs(ns.Peers()) do
+    if type(p) == "table" and type(p.version) == "string" and ns.VersionNewer(p.version, ns.VERSION)
+        and (not best or ns.VersionNewer(p.version, best)) then
+      best, by = p.version, name
+    end
+  end
+  if best then
+    ns.NoteNewerVersion(best, by)
+  end
+end
+
+---------------------------------------------------------------------------
 -- For other addons (VendorSnipe reads this when a friend's scan is newer than yours)
 ---------------------------------------------------------------------------
 PriceShare = {
@@ -755,6 +890,10 @@ end
 local function Help()
   print("|cff66ccffPriceShare|r commands (/ps or /priceshare):")
   print("   /ps - status")
+  print("   /ps find [name] - price lookup window (also the minimap button, or a key in Key Bindings)")
+  print("   /ps minimap - show or hide the minimap button")
+  print("   /ps sound [number] - the update reminder's sound (also on the minimap button, right-click)")
+  print("   /ps remind - show the update reminder now")
   print("   /ps scan - Full Scan now (Auction House open, once per 15 min)")
   print("   /ps quick - Quick Scan: goes through every search page, no 15 min wait")
   print("   /ps auto on|off - Full Scan when you open the AH")
@@ -781,6 +920,33 @@ SlashCmdList.PRICESHARE = function(msg)
   if cmd == "" or cmd == "status" then
     Print("status (version " .. ns.VERSION .. ")")
     Status()
+  elseif cmd == "find" or cmd == "lookup" or cmd == "price" then
+    if ns.Lookup then
+      ns.Lookup.Open(rest ~= "" and rest or nil)
+    end
+  elseif cmd == "sound" then
+    local pick = tonumber(arg) and ns.SOUNDS[tonumber(arg)] or SoundChoice(arg)
+    if pick then
+      ns.SetReminderSound(pick.key)
+      Print("Update reminder sound: " .. pick.label .. ".")
+    else
+      Print("Update reminder sound: " .. ns.ReminderSoundLabel() .. ". To change it (or the minimap button, right-click):")
+      for i, s in ipairs(ns.SOUNDS) do
+        print(string.format("   /ps sound %d - %s", i, s.label))
+      end
+    end
+  elseif cmd == "remind" then
+    if newest then
+      Remind()
+    else
+      Print("You have the newest PriceShare your friends run (" .. ns.VERSION .. "). This is what the reminder looks like:")
+      Remind(true)
+    end
+  elseif cmd == "minimap" then
+    if ns.Lookup then
+      ns.Lookup.SetMinimapShown(db.minimapHidden == true)
+      Print("Minimap button: " .. (db.minimapHidden and "hidden (/ps minimap brings it back)" or "shown") .. ".")
+    end
   elseif cmd == "scan" then
     StartScan(true)
   elseif cmd == "quick" then
@@ -836,6 +1002,7 @@ events:RegisterEvent("PLAYER_LOGIN")
 events:RegisterEvent("AUCTION_HOUSE_SHOW")
 events:RegisterEvent("AUCTION_HOUSE_CLOSED")
 events:RegisterEvent("REPLICATE_ITEM_LIST_UPDATE")
+events:RegisterEvent("PLAYER_REGEN_ENABLED")
 
 events:SetScript("OnUpdate", ns.Guard("scan reading", function()
   if not scan.worker then
@@ -867,6 +1034,13 @@ events:SetScript("OnEvent", ns.Guard("core events", function(_, event, ...)
       tostring(UnitFactionGroup("player")), tostring(IsInGuild and IsInGuild()))
     if ns.Sync then
       ns.Sync.Start()
+    end
+    C_Timer.After(REMIND_AFTER_LOGIN, ns.Guard("saved versions", CheckSavedVersions))
+  elseif event == "PLAYER_REGEN_ENABLED" then
+    if remindWaiting then
+      C_Timer.After(2, function()
+        Remind()
+      end)
     end
   elseif event == "AUCTION_HOUSE_SHOW" then
     ahOpen = true

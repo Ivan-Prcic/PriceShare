@@ -1,10 +1,11 @@
 ## Interface: 16001
 ## Title: PriceShare
-## Notes: Light Auction House price scanner. Scans when you open the AH (at most every 15 min) and shares the newest prices with friends who also run it.
-## Version: 1.5
+## Notes: Light Auction House price scanner. Scans when you open the AH (at most every 15 min), shares the newest prices with friends who also run it, and looks up any item's price anywhere.
+## Version: 1.6
 ## X-Website: https://github.com/Ivan-Prcic/PriceShare
 ## SavedVariables: PRICESHARE_DB
 
 Core.lua
 Sync.lua
 Quick.lua
+Lookup.lua

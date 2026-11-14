@@ -1,0 +1,6 @@
+<Bindings>
+  <!-- Key Bindings > AddOns > PriceShare. Names are set in Lookup.lua. -->
+  <Binding name="PRICESHARE_LOOKUP" header="PRICESHARE" category="ADDONS">
+    PriceShare_ToggleLookup()
+  </Binding>
+</Bindings>
