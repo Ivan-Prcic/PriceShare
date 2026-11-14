@@ -369,10 +369,15 @@ end
 ---------------------------------------------------------------------------
 -- Hellos
 ---------------------------------------------------------------------------
+-- Fields 10-11 (from 1.6.1): the newest PriceShare version this client has heard of, when
+-- newer than its own, and when someone was last seen running it, so news of an update
+-- spreads through friends who haven't updated yet. Older copies read fields 1-9 only.
 local function HelloFor(code, query)
   local store = ns.Store(code)
+  local heard, seenAt = ns.NewestHeard()
   return table.concat({ "H", PROTO, code, E36(store and store.t or 0), E36(store and store.n or 0),
-    query and "q" or "-", store and store.by or "", ns.VERSION, ns.AHGroup(ns.MyRealm()) }, "^")
+    query and "q" or "-", store and store.by or "", ns.VERSION, ns.AHGroup(ns.MyRealm()),
+    heard or "", heard and E36(seenAt or 0) or "" }, "^")
 end
 
 local function HelloMessages(query)
@@ -802,6 +807,12 @@ local function OnHello(who, f, channel)
   ns.Peers()[who].version = version or "1.0"
   if version and ns.VersionNewer(version, ns.VERSION) then
     ns.NoteNewerVersion(version, who) -- colored reminder now, then every 5 minutes (Core.lua)
+  end
+  -- a newer version they've heard of (passed on by friends of theirs), and when someone
+  -- was last seen running it
+  local heardOf, seenAt = f[10] ~= "" and f[10] or nil, D36(f[11])
+  if heardOf and seenAt > 0 and seenAt <= ns.Now() + 600 and ns.VersionNewer(heardOf, ns.VERSION) then
+    ns.NoteNewerVersion(heardOf, who, false, true, seenAt)
   end
   if f[6] == "q" then
     ReplyHello(who)

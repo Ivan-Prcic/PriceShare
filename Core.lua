@@ -28,7 +28,7 @@ ns.FRESH = FRESH
 -- not read from PriceShare.toc: WoW reads .toc files only when the game starts, so after
 -- an update and a /reload the .toc would still report the old version.
 -- (Keep "## Version" in PriceShare.toc the same; Update-PriceShare.bat reads that one.)
-ns.VERSION = "1.6"
+ns.VERSION = "1.6.1"
 ns.UPDATE_HOW = "double-click Update-PriceShare.bat in Interface\\AddOns\\PriceShare, then restart WoW (or /reload, if it says that's enough)"
 
 -- true when version a is newer than b ("1.10" > "1.9")
@@ -761,25 +761,80 @@ local function Remind(preview)
   end
   local version = newest and newest.version or "?"
   local who = newest and newest.who and ns.Short(newest.who) or "a friend"
-  print(string.format("|cff66ccffPriceShare|r: |cffff8000Update available!|r %s runs PriceShare |cff40ff40%s|r, " ..
-    "you have |cffff4040%s|r. Until you update, you may miss your friends' newest prices.", who, version, ns.VERSION))
+  local news = (newest and newest.relayed)
+    and string.format("PriceShare |cff40ff40%s|r is out (word from %s)", version, who)
+    or string.format("%s runs PriceShare |cff40ff40%s|r", who, version)
+  print(string.format("|cff66ccffPriceShare|r: |cffff8000Update available!|r %s, you have |cffff4040%s|r. " ..
+    "Until you update, you may miss your friends' newest prices.", news, ns.VERSION))
   print("   |cffffd040How to update:|r double-click |cffffffffUpdate-PriceShare.bat|r in |cffffffff" ..
     "World of Warcraft\\_forever_\\Interface\\AddOns\\PriceShare|r (it downloads the new version), then |cffffffffrestart WoW|r. " ..
     "|cff999999(Reminds you every 5 minutes. Sound: minimap button, right-click.)|r")
   ns.PlayReminderSound()
 end
 
--- A friend runs version (seen live, or saved from an earlier session).
-function ns.NoteNewerVersion(version, who, quietly)
-  if not ns.VersionNewer(version, ns.VERSION) then
+-- A version number as PriceShare writes them ("1.6", "1.6.1"): anything else is ignored.
+function ns.ValidVersion(v)
+  return type(v) == "string" and #v <= 12 and v:match("^%d+%.%d+[%.%d]*$") ~= nil and not v:find("%.%.") and
+    v:sub(-1) ~= "."
+end
+
+-- News of a newer version, passed on in every hello (so it spreads through friends who
+-- haven't updated yet), and kept over logins: { v = version, via = who told you,
+-- t = when anyone last actually saw someone running it }. Passing the news on doesn't
+-- renew t, only seeing it run does, so it's dropped RELAY_KEEP after that (a typo'd or
+-- test version can't nag everyone forever), or once you have that version.
+local RELAY_KEEP = 14 * 86400
+
+local function Heard()
+  local h = db and db.heardVersion
+  if type(h) ~= "table" or not ns.ValidVersion(h.v) or not ns.VersionNewer(h.v, ns.VERSION)
+      or ns.Now() - (tonumber(h.t) or 0) > RELAY_KEEP then
+    if db then
+      db.heardVersion = nil
+    end
+    return nil
+  end
+  return h
+end
+
+-- The newest PriceShare version you've heard of when it's newer than yours, and when
+-- someone was last seen running it (server time); nil when there's none.
+function ns.NewestHeard()
+  local h = Heard()
+  if h then
+    return h.v, tonumber(h.t)
+  end
+end
+ns.RELAY_KEEP = RELAY_KEEP
+
+-- A friend runs version (relayed: a friend heard of it), seen live or saved earlier.
+-- seenAt: when someone was seen running it (now for a friend who runs it).
+function ns.NoteNewerVersion(version, who, quietly, relayed, seenAt)
+  if not ns.ValidVersion(version) or not ns.VersionNewer(version, ns.VERSION) then
     return
   end
+  seenAt = math.min(tonumber(seenAt) or ns.Now(), ns.Now())
+  if ns.Now() - seenAt > RELAY_KEEP then
+    return -- old news
+  end
+  local h = Heard()
+  if not h or ns.VersionNewer(version, h.v) then
+    db.heardVersion = { v = version, via = who, t = seenAt }
+  elseif version == h.v and seenAt > (tonumber(h.t) or 0) then
+    h.t = seenAt -- seen running more recently
+    if not relayed then
+      h.via = who
+    end
+  end
   if newest and not ns.VersionNewer(version, newest.version) then
+    if version == newest.version and newest.relayed and not relayed then
+      newest.who, newest.relayed = who, nil -- now seen from someone who runs it
+    end
     return
   end
   local first = newest == nil
-  newest = { version = version, who = who }
-  ns.Log("newer PriceShare %s seen from %s", tostring(version), tostring(who))
+  newest = { version = version, who = who, relayed = relayed or nil }
+  ns.Log("newer PriceShare %s %s %s", tostring(version), relayed and "heard of via" or "run by", tostring(who))
   if first then
     if not quietly then
       Remind()
@@ -796,17 +851,20 @@ function ns.NoteNewerVersion(version, who, quietly)
   end
 end
 
--- The newest version any linked friend ran last time you saw them.
+-- The newest version any linked friend ran last time you saw them, or that you heard of.
 local function CheckSavedVersions()
-  local best, by
+  local best, by, at
   for name, p in pairs(ns.Peers()) do
-    if type(p) == "table" and type(p.version) == "string" and ns.VersionNewer(p.version, ns.VERSION)
+    if type(p) == "table" and ns.ValidVersion(p.version) and ns.VersionNewer(p.version, ns.VERSION)
         and (not best or ns.VersionNewer(p.version, best)) then
-      best, by = p.version, name
+      best, by, at = p.version, name, p.seen
     end
   end
-  if best then
-    ns.NoteNewerVersion(best, by)
+  local h = Heard()
+  if h and (not best or ns.VersionNewer(h.v, best)) then
+    ns.NoteNewerVersion(h.v, h.via, false, true, h.t)
+  elseif best then
+    ns.NoteNewerVersion(best, by, false, false, at)
   end
 end
 

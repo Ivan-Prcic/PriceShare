@@ -30,7 +30,9 @@ newest version over the old one. Then type `/reload` in game (it tells you if a 
 needed instead).
 
 When a friend has a newer version than you, PriceShare reminds you in chat every 5 minutes (not
-during combat), with a sound, until you update. The sound is a Warcraft III Peon's "Work work."
+during combat), with a sound, until you update. The news is passed on from friend to friend
+(from 1.6.1), so you hear about an update even if you only play with friends who haven't updated
+yet. The sound is a Warcraft III Peon's "Work work."
 by default; pick another (or none) on the minimap button's right-click menu, or with `/ps sound`.
 
 ## Price lookup
