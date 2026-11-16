@@ -28,7 +28,7 @@ ns.FRESH = FRESH
 -- not read from PriceShare.toc: WoW reads .toc files only when the game starts, so after
 -- an update and a /reload the .toc would still report the old version.
 -- (Keep "## Version" in PriceShare.toc the same; Update-PriceShare.bat reads that one.)
-ns.VERSION = "1.6.1"
+ns.VERSION = "1.6.2"
 ns.UPDATE_HOW = "double-click Update-PriceShare.bat in Interface\\AddOns\\PriceShare, then restart WoW (or /reload, if it says that's enough)"
 
 -- true when version a is newer than b ("1.10" > "1.9")
@@ -517,6 +517,20 @@ end
 
 local function OnReplicateRequested()
   if not db then
+    return
+  end
+  -- A scan already being read keeps going: another addon asking inside the server's 15 minute
+  -- cooldown gets no new data, and dropping ours lost the whole scan. If new data does come,
+  -- OnReplicateReady starts over with it. The cooldown clock (db.lastScan) isn't reset either.
+  if scan.worker then
+    scan.awaiting = true
+    scan.market = ahOpen and ns.ahMarket or ns.MarketHere()
+    local gen = scan.gen
+    C_Timer.After(SCAN_TIMEOUT, function()
+      if scan.awaiting and scan.gen == gen then
+        scan.awaiting = false
+      end
+    end)
     return
   end
   db.lastScan = time()
