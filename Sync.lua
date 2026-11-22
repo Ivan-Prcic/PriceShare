@@ -284,7 +284,7 @@ local function Sweep()
       end
       local market = g.realmName and ns.AHGroup(g.realmName)
       bnetSeen[#bnetSeen + 1] = { name = name or g.characterName, why = why, realm = g.realmName,
-        other = market and market ~= ns.AHGroup(ns.MyRealm()) }
+        other = market and market ~= "" and market ~= ns.AHGroup(ns.MyRealm()) }
       if name and not why then
         social[name] = "bnet"
         whisper[name] = true
@@ -376,7 +376,7 @@ local function HelloFor(code, query)
   local store = ns.Store(code)
   local heard, seenAt = ns.NewestHeard()
   return table.concat({ "H", PROTO, code, E36(store and store.t or 0), E36(store and store.n or 0),
-    query and "q" or "-", store and store.by or "", ns.VERSION, ns.AHGroup(ns.MyRealm()),
+    query and "q" or "-", store and store.by or "", ns.VERSION, ns.AnnouncedGroup(),
     heard or "", heard and E36(seenAt or 0) or "" }, "^")
 end
 
@@ -513,8 +513,8 @@ function Sync.Choose(code)
   local mine = store and store.t or 0
   local best, cands = 0, {}
   for name, k in pairs(known[code] or {}) do
-    if k.t > mine and k.t <= ns.Now() + 600 and online[name] and not offline[name] and not DB().blocked[name]
-        and (not failed[name] or failed[name] < GetTime()) then
+    if k.t > mine and k.t <= ns.Now() + 600 and not ns.Rejected(code, k.t) and online[name] and not offline[name]
+        and not DB().blocked[name] and (not failed[name] or failed[name] < GetTime()) then
       if k.t > best then
         best, cands = k.t, { name }
       elseif k.t == best then
@@ -550,6 +550,10 @@ local function OnStart(who, f)
   end
   local T = D36(f[3])
   local store = ns.Store(code)
+  if ns.Rejected(code, T) then
+    FailRequest(code, "a scan we don't take for this market", 3600)
+    return
+  end
   if T <= (store and store.t or 0) or T > ns.Now() + 600 or (f[4] == "d" and r.X == 0) then
     FailRequest(code, "nothing newer", 60)
     return
@@ -759,7 +763,7 @@ local function OnRequest(who, f)
   end
   local msgs, mode, count, seq = BuildStream(store, code, X)
   Queue(table.concat({ "S", code, E36(store.t), mode, E36(count), E36(seq), store.by or "",
-    store.kind == "quick" and "q" or "f", ns.AHGroup(ns.MyRealm()) }, "^"), "WHISPER", who)
+    store.kind == "quick" and "q" or "f", ns.AnnouncedGroup() }, "^"), "WHISPER", who)
   streams[#streams + 1] = { target = who, msgs = msgs, i = 1, market = code }
   lastBuilt[who] = { code = code, T = store.t, msgs = msgs, at = GetTime() }
   ns.Debug(string.format("sending %s %d entries (%d messages) to %s", mode == "d" and "changes:" or "everything:",
@@ -830,7 +834,7 @@ local function OnHello(who, f, channel)
   known[code] = known[code] or {}
   known[code][who] = { t = T, n = n }
   local store = ns.Store(code)
-  if T > (store and store.t or 0) and T <= ns.Now() + 600 then
+  if T > (store and store.t or 0) and T <= ns.Now() + 600 and not ns.Rejected(code, T) then
     Sync.Want(code)
   end
 end

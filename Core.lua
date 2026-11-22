@@ -28,7 +28,7 @@ ns.FRESH = FRESH
 -- not read from PriceShare.toc: WoW reads .toc files only when the game starts, so after
 -- an update and a /reload the .toc would still report the old version.
 -- (Keep "## Version" in PriceShare.toc the same; Update-PriceShare.bat reads that one.)
-ns.VERSION = "1.6.2"
+ns.VERSION = "1.6.3"
 ns.UPDATE_HOW = "double-click Update-PriceShare.bat in Interface\\AddOns\\PriceShare, then restart WoW (or /reload, if it says that's enough)"
 
 -- true when version a is newer than b ("1.10" > "1.9")
@@ -157,8 +157,38 @@ end
 -- Names and realms. Names are kept as "Name-Realm" (on Forever a name can be
 -- "First Last"), so the same person always has the same key.
 ---------------------------------------------------------------------------
+-- The realm's name as the game gives it ("" when it gives none).
+local function GameRealm()
+  local r = GetNormalizedRealmName and GetNormalizedRealmName()
+  if not r or r == "" then
+    r = ((GetRealmName and GetRealmName()) or ""):gsub("[%s%-]", "")
+  end
+  return r
+end
+ns.GameRealm = GameRealm
+
+-- Since 22 Nov 2026 (02:19) Forever has given addons an empty realm name: prices went under
+-- ":H" and friends became "Name-". So the last name the game gave is kept (PRICESHARE_DB.realm)
+-- and used while it gives none; before one was kept, the one your newest saved prices are under.
 local function MyRealm()
-  return (GetNormalizedRealmName and GetNormalizedRealmName()) or (GetRealmName() or ""):gsub("[%s%-]", "")
+  local r = GameRealm()
+  local saved = PRICESHARE_DB
+  if r ~= "" then
+    if saved and saved.realm ~= r then
+      saved.realm = r
+    end
+    return r
+  end
+  if saved and not saved.realm then
+    local bestT
+    for key, store in pairs(saved.markets or {}) do
+      local realm = type(key) == "string" and key:match("^(.+):%a$")
+      if realm and (not bestT or (store.t or 0) > bestT) then
+        saved.realm, bestT = realm, store.t or 0
+      end
+    end
+  end
+  return (saved and saved.realm) or ""
 end
 ns.MyRealm = MyRealm
 
@@ -188,6 +218,16 @@ function ns.IsMyRealm(realm)
     or ns.AHGroup(r) == ns.AHGroup(MyRealm())
 end
 
+-- The Auction House group told to friends (hellos, price streams). While the game gives no realm
+-- name, friends' copies of PriceShare see none either and take an empty group as their own, and
+-- any other as another Auction House: so none is told then.
+function ns.AnnouncedGroup()
+  if GameRealm() == "" then
+    return ""
+  end
+  return ns.AHGroup(MyRealm())
+end
+
 -- First word of a name, lower case: "Zakstor Wildroot-Realm" -> "zakstor"
 function ns.FirstName(name)
   return type(name) == "string" and (name:match("^(%S+)") or name):gsub("%-.*$", ""):lower() or nil
@@ -199,7 +239,8 @@ function ns.Norm(name)
   if type(name) ~= "string" then
     return nil
   end
-  name = name:gsub("^%s+", ""):gsub("%s+$", "")
+  -- (a trailing "-": a name saved while the game gave no realm name)
+  name = name:gsub("^%s+", ""):gsub("%s+$", ""):gsub("%-+$", "")
   if name == "" then
     return nil
   end
@@ -215,13 +256,14 @@ function ns.Norm(name)
   return base .. "-" .. realm
 end
 
--- Whisper target: plain name on your own realm (how other Forever addons do it).
+-- Whisper target: plain name on your own realm (how other Forever addons do it). "Name-" (no
+-- realm known) is your realm too: nobody can be whispered as "Name-".
 function ns.WhisperName(name)
   if type(name) ~= "string" then
     return name
   end
-  local base, realm = name:match("^(.-)%-([^%-]+)$")
-  if base and realm == MyRealm() then
+  local base, realm = name:match("^(.-)%-([^%-]*)$")
+  if base and (realm == "" or realm == MyRealm()) then
     return base
   end
   return name
@@ -232,8 +274,8 @@ function ns.Short(name)
   if type(name) ~= "string" then
     return "?"
   end
-  local base, realm = name:match("^(.-)%-([^%-]+)$")
-  if base and (realm == MyRealm() or ns.IsMyRealm(realm)) then
+  local base, realm = name:match("^(.-)%-([^%-]*)$")
+  if base and (realm == "" or realm == MyRealm() or ns.IsMyRealm(realm)) then
     return base
   end
   return name
@@ -266,24 +308,55 @@ end
 -- Stranglethorn Vale (Booty Bay), Tanaris (Gadgetzan), Winterspring (Everlook)
 local NEUTRAL_MAPS = { [1434] = true, [1446] = true, [1452] = true }
 local NEUTRAL_TOWNS = { ["Booty Bay"] = true, ["Gadgetzan"] = true, ["Everlook"] = true }
+-- each of these zones has only the goblin Auction House
+local NEUTRAL_ZONES = { ["Stranglethorn Vale"] = true, ["The Cape of Stranglethorn"] = true, ["Tanaris"] = true,
+  ["Winterspring"] = true }
 ns.MARKET_NAMES = { H = "Horde", A = "Alliance", N = "Neutral (goblin)" }
 
 function ns.HomeMarket()
   return UnitFactionGroup("player") == "Alliance" and "A" or "H"
 end
 
--- Which Auction House you're standing at.
-function ns.MarketHere()
-  if GetSubZoneText and NEUTRAL_TOWNS[GetSubZoneText() or ""] then
-    return "N"
+-- The auctioneer you're talking to says whose Auction House it is: a Horde or Alliance one
+-- runs that faction's, one with no faction (the Steamwheedle goblins) runs the neutral one.
+-- The game seldom gives an NPC's race; when it says goblin, that's the neutral one too.
+local function MarketFromAuctioneer()
+  if not UnitExists or not UnitExists("npc") or (UnitIsPlayer and UnitIsPlayer("npc")) then
+    return nil
   end
+  local name = (UnitName and UnitName("npc")) or "?"
+  local faction = UnitFactionGroup and UnitFactionGroup("npc")
+  if faction == "Horde" then
+    return "H", name .. " is Horde"
+  elseif faction == "Alliance" then
+    return "A", name .. " is Alliance"
+  end
+  if UnitRace and UnitRace("npc") == "Goblin" then
+    return "N", name .. " is a goblin"
+  end
+  return "N", name .. " has no faction"
+end
+
+-- Which Auction House you're standing at, and how that was decided: by the auctioneer, or
+-- (with no auctioneer to ask) by the town, zone or map you're in.
+function ns.MarketHere()
+  local code, why = MarketFromAuctioneer()
+  if code then
+    return code, "auctioneer: " .. why
+  end
+  local sub = GetSubZoneText and GetSubZoneText() or ""
+  local zone = (GetRealZoneText and GetRealZoneText()) or (GetZoneText and GetZoneText()) or ""
   local map = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
+  local where = string.format("no auctioneer to ask; subzone %q, zone %q, map %s", sub, zone, tostring(map))
+  if NEUTRAL_TOWNS[sub] or NEUTRAL_ZONES[zone] then
+    return "N", where
+  end
   for _ = 1, 6 do
     if not map then
       break
     end
     if NEUTRAL_MAPS[map] then
-      return "N"
+      return "N", where
     end
     local info = C_Map.GetMapInfo and C_Map.GetMapInfo(map)
     map = info and info.parentMapID
@@ -291,7 +364,7 @@ function ns.MarketHere()
       break
     end
   end
-  return ns.HomeMarket()
+  return ns.HomeMarket(), where
 end
 
 ---------------------------------------------------------------------------
@@ -326,6 +399,100 @@ local function InitDB()
     db.chat = true
   end
   ns.db = db
+end
+
+-- Scans never to take from a friend for a market: db.rejected["Realm:H"][scanTime] = true.
+function ns.Rejected(code, t)
+  local r = db and db.rejected and db.rejected[MyRealm() .. ":" .. tostring(code)]
+  return (r and t and r[t]) and true or false
+end
+
+-- 17 Nov 2026: a Booty Bay Full Scan (13:27) was saved as the Horde Auction House before the
+-- auctioneer was asked, and went to friends as Horde prices. Move it to the neutral one, and
+-- never take it back as Horde prices: the next Horde Full Scan replaces it everywhere.
+local MISFILED = { from = "H", to = "N", t = 1794918433 }
+local function RepairMisfiled()
+  local realm = MyRealm()
+  local fromKey, toKey = realm .. ":" .. MISFILED.from, realm .. ":" .. MISFILED.to
+  local bad = db.markets[fromKey]
+  if not bad or bad.t ~= MISFILED.t then
+    return
+  end
+  db.rejected = db.rejected or {}
+  db.rejected[fromKey] = db.rejected[fromKey] or {}
+  db.rejected[fromKey][MISFILED.t] = true
+  local goblin = db.markets[toKey]
+  if not goblin or (goblin.t or 0) < bad.t then
+    bad.gone, bad.lin = {}, { bad.t } -- what it marked gone was measured against Horde prices
+    db.markets[toKey] = bad
+  end
+  db.markets[fromKey] = nil
+  ns.Log("repair: the Horde scan of %s by %s was a goblin Auction House scan: moved to %s, and refused from friends as Horde",
+    date("%d %b %H:%M", MISFILED.t), tostring(bad.by), toKey)
+  C_Timer.After(10, function()
+    ns.Print("Your Booty Bay Full Scan (17 Nov 13:27) was saved and shared as Horde prices. It's filed under the "
+      .. "neutral Auction House now, and friends' copies of it won't come back as Horde prices. Your next Full Scan "
+      .. "at the Horde Auction House replaces it for everyone.")
+  end)
+end
+
+-- Prices, friends and refused scans saved under an empty realm name (from 22 Nov 2026 02:19,
+-- until PriceShare kept the last name) go back under the realm's own: the newer scan is kept.
+-- Returns the scan times moved.
+local function MergeEmptyRealm()
+  local realm = MyRealm()
+  local moved = {}
+  if realm == "" then
+    return moved
+  end
+  local codes = {}
+  for key in pairs(db.markets) do
+    local code = type(key) == "string" and key:match("^:(%a)$")
+    if code then
+      codes[#codes + 1] = code
+    end
+  end
+  for _, code in ipairs(codes) do
+    local from, toKey = db.markets[":" .. code], realm .. ":" .. code
+    local to = db.markets[toKey]
+    if not to or (to.t or 0) < (from.t or 0) then
+      from.by = ns.Norm(from.by) or from.by
+      db.markets[toKey] = from
+      moved[#moved + 1] = from.t or 0
+      ns.Log("empty realm name: the %s scan of %s by %s moved to %s", code, date("%d %b %H:%M", from.t or 0),
+        tostring(from.by), toKey)
+    end
+    db.markets[":" .. code] = nil
+  end
+  local lost = db.peers[""]
+  if lost then
+    db.peers[realm] = db.peers[realm] or {}
+    local mine = db.peers[realm]
+    for name, p in pairs(lost) do
+      local key = ns.Norm(name) or name
+      if not mine[key] or (mine[key].seen or 0) < (p.seen or 0) then
+        mine[key] = p
+      end
+    end
+    db.peers[""] = nil
+  end
+  if db.rejected then
+    local keys = {}
+    for key in pairs(db.rejected) do
+      if type(key) == "string" and key:match("^:%a$") then
+        keys[#keys + 1] = key
+      end
+    end
+    for _, key in ipairs(keys) do
+      local toKey = realm .. key
+      db.rejected[toKey] = db.rejected[toKey] or {}
+      for t in pairs(db.rejected[key]) do
+        db.rejected[toKey][t] = true
+      end
+      db.rejected[key] = nil
+    end
+  end
+  return moved
 end
 
 function ns.Store(code, create)
@@ -1104,6 +1271,18 @@ events:SetScript("OnEvent", ns.Guard("core events", function(_, event, ...)
     ns.Log("=== login: PriceShare %s, me=%s (GetUnitName=%s, UnitName=%s), realm=%s (GetRealmName=%s), faction=%s, guild=%s",
       ns.VERSION, tostring(ns.me), tostring(name), tostring(UnitName("player")), MyRealm(), tostring(GetRealmName()),
       tostring(UnitFactionGroup("player")), tostring(IsInGuild and IsInGuild()))
+    if GameRealm() == "" then
+      ns.Log("the game gives no realm name: using %s, the last one it gave", MyRealm())
+    end
+    local moved = MergeEmptyRealm()
+    if #moved > 0 then
+      C_Timer.After(10, function()
+        ns.Print(string.format("The game gave no realm name for a while, so your scan of %s was filed apart. It's back " ..
+          "under %s now, and PriceShare keeps using that name while the game gives none.", date("%d %b %H:%M", moved[1]),
+          MyRealm()))
+      end)
+    end
+    RepairMisfiled()
     if ns.Sync then
       ns.Sync.Start()
     end
@@ -1116,7 +1295,9 @@ events:SetScript("OnEvent", ns.Guard("core events", function(_, event, ...)
     end
   elseif event == "AUCTION_HOUSE_SHOW" then
     ahOpen = true
-    ns.ahMarket = ns.MarketHere()
+    local why
+    ns.ahMarket, why = ns.MarketHere()
+    ns.Log("Auction House open: %s (%s)", ns.MARKET_NAMES[ns.ahMarket] or tostring(ns.ahMarket), tostring(why))
     if db.autoScan then
       C_Timer.After(AUTO_DELAY, function()
         StartScan(false)

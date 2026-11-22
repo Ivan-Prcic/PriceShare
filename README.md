@@ -44,7 +44,9 @@ by default; pick another (or none) on the minimap button's right-click menu, or 
 - **Hover** a row for the item's tooltip, **Shift-click** to link it in chat, **Ctrl-click** to try
   it on. Click it for details, including what yours are worth.
 - **Auction House** button: your faction's prices or the goblin one's (Booty Bay, Gadgetzan,
-  Everlook). **Filter**: only some rarities.
+  Everlook). **Filter**: only some rarities. A scan is filed under the Auction House of the
+  auctioneer you're talking to: a Horde or Alliance one runs that faction's, a goblin with no
+  faction runs the goblin one.
 - Items that sold out show as "none listed" when you search for them.
 
 The prices come from the newest scan anyone in your PriceShare group has. Scans carry item numbers
@@ -65,6 +67,11 @@ all CAMWOW EU PvP realms share one (EU4 and EU5 checked in game); PvE realms are
 
 Friends on another Auction House still show in `/ps friends`, marked "other Auction House";
 their prices are never mixed into yours.
+
+**No realm name from the game.** Since 22 Nov 2026 WoW Forever can give addons an empty realm
+name. From 1.6.3 PriceShare then keeps using the last realm name it saw, and prices saved under
+the empty one go back where they belong. Older versions can't reach anyone while it lasts (they
+whisper friends as "Name-"), so make sure your friends update.
 
 `/ps check` shows what PriceShare sees, and `/ps ping Name` tests one person.
 
