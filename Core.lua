@@ -29,7 +29,7 @@ ns.FRESH = FRESH
 -- not read from PriceShare.toc: WoW reads .toc files only when the game starts, so after
 -- an update and a /reload the .toc would still report the old version.
 -- (Keep "## Version" in PriceShare.toc the same; Update-PriceShare.bat reads that one.)
-ns.VERSION = "1.6.4"
+ns.VERSION = "1.6.5"
 ns.UPDATE_HOW = "double-click Update-PriceShare.bat in Interface\\AddOns\\PriceShare, then restart WoW (or /reload, if it says that's enough)"
 
 -- true when version a is newer than b ("1.10" > "1.9")

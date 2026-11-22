@@ -244,7 +244,9 @@ function Quick.CreateButtons()
   end
   ui = CreateFrame("Frame", nil, AuctionHouseFrame)
   ui:SetSize(BAR_WIDTH, 24)
-  ui:SetPoint("BOTTOMRIGHT", AuctionHouseFrame, "TOPRIGHT", -4, 2)
+  -- Just past the Auction House's top-right corner, not on its top edge: other addons put their
+  -- buttons along that edge, and ours sat on top of them.
+  ui:SetPoint("BOTTOMLEFT", AuctionHouseFrame, "TOPRIGHT", 4, 2)
   ui.quick = CreateFrame("Button", nil, ui, "UIPanelButtonTemplate")
   ui.quick:SetSize(104, 22)
   ui.quick:SetPoint("RIGHT", ui, "RIGHT", 0, 0)
@@ -272,12 +274,12 @@ function Quick.CreateButtons()
   end)
   Tip(ui.lookup, "Price Lookup", "Look up any item's price from the newest scan you or a friend has, without searching here. " ..
     "Also on the minimap button, anywhere.")
-  -- How old the prices are goes above the buttons, never to their left: other addons put
-  -- buttons along the Auction House's top edge too, and a long line ran in under them.
+  -- How old the prices are goes above the buttons, within their width: a long line to their
+  -- left ran in under other addons' buttons.
   ui.label = ui:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  ui.label:SetPoint("BOTTOMRIGHT", ui.quick, "TOPRIGHT", -2, 3)
+  ui.label:SetPoint("BOTTOMLEFT", ui.lookup, "TOPLEFT", 2, 3)
   ui.label:SetWidth(BAR_WIDTH - 4)
-  ui.label:SetJustifyH("RIGHT")
+  ui.label:SetJustifyH("LEFT")
   if ui.label.SetWordWrap then
     ui.label:SetWordWrap(false) -- too long for the buttons' width: cut off with "...", not wrapped
   end
