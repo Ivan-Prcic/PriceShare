@@ -13,7 +13,8 @@
 local _, ns = ...
 
 local SCAN_COOLDOWN = 15 * 60   -- the server allows one Full Scan per 15 minutes
-local SCAN_TIMEOUT = 30         -- seconds to wait for the server to send scan data
+local SCAN_TIMEOUT = 30         -- seconds the Full Scan waits for the server's data...
+local SCAN_LATE = 120           -- ...which is still read if it comes up to this long after asking
 local AUTO_DELAY = 2            -- seconds after the AH opens before the auto-scan
 local AUTO_TRIES = 10           -- ...retried each second while the AH is busy
 local FRESH = 48 * 3600         -- older prices aren't shown or handed to other addons
@@ -28,7 +29,7 @@ ns.FRESH = FRESH
 -- not read from PriceShare.toc: WoW reads .toc files only when the game starts, so after
 -- an update and a /reload the .toc would still report the old version.
 -- (Keep "## Version" in PriceShare.toc the same; Update-PriceShare.bat reads that one.)
-ns.VERSION = "1.6.3"
+ns.VERSION = "1.6.4"
 ns.UPDATE_HOW = "double-click Update-PriceShare.bat in Interface\\AddOns\\PriceShare, then restart WoW (or /reload, if it says that's enough)"
 
 -- true when version a is newer than b ("1.10" > "1.9")
@@ -605,7 +606,7 @@ end
 ---------------------------------------------------------------------------
 -- Reading a Full Scan
 ---------------------------------------------------------------------------
-local scan = { awaiting = false, gen = 0 }
+local scan = { awaiting = false, late = false, gen = 0 }
 local ahOpen = false
 local deadline = 0
 
@@ -682,22 +683,43 @@ local function Process(count, gen, code)
   end
 end
 
+-- Waiting for a Full Scan's data. The server took 17-29 s in Nov 2026 and the wait used to end
+-- at 30 s, so a slower answer was thrown away. Now the buttons work again after SCAN_TIMEOUT,
+-- but data that comes up to SCAN_LATE after asking is still read.
+local function WaitForData(gen)
+  C_Timer.After(SCAN_TIMEOUT, function()
+    if scan.awaiting and scan.gen == gen then
+      scan.awaiting = false
+      scan.late = true
+    end
+  end)
+  C_Timer.After(SCAN_LATE, function()
+    if scan.late and scan.gen == gen then
+      scan.late = false
+      ns.Log("no Full Scan data came back within %d s (server cooldown still running?)", SCAN_LATE)
+      if scan.ours and db.chat then
+        Print("No Full Scan data came back. The server allows one every 15 minutes; the button shows when it's ready again.")
+      end
+    end
+  end)
+end
+
+local askingOwn = false -- true while our own Full Scan request is being sent
+
 local function OnReplicateRequested()
   if not db then
     return
   end
+  scan.askedAt = GetTime()
+  scan.ours = askingOwn
+  scan.late = false
   -- A scan already being read keeps going: another addon asking inside the server's 15 minute
   -- cooldown gets no new data, and dropping ours lost the whole scan. If new data does come,
   -- OnReplicateReady starts over with it. The cooldown clock (db.lastScan) isn't reset either.
   if scan.worker then
     scan.awaiting = true
     scan.market = ahOpen and ns.ahMarket or ns.MarketHere()
-    local gen = scan.gen
-    C_Timer.After(SCAN_TIMEOUT, function()
-      if scan.awaiting and scan.gen == gen then
-        scan.awaiting = false
-      end
-    end)
+    WaitForData(scan.gen)
     return
   end
   db.lastScan = time()
@@ -705,21 +727,18 @@ local function OnReplicateRequested()
   scan.gen = scan.gen + 1
   scan.worker = nil
   scan.market = ahOpen and ns.ahMarket or ns.MarketHere()
-  local gen = scan.gen
-  C_Timer.After(SCAN_TIMEOUT, function()
-    if scan.awaiting and scan.gen == gen then
-      scan.awaiting = false
-      ns.Debug("no Full Scan data came back (server cooldown still running?)")
-    end
-  end)
+  WaitForData(scan.gen)
 end
 
 local function OnReplicateReady()
-  if not scan.awaiting then
+  if not scan.awaiting and not scan.late then
     return
   end
-  scan.awaiting = false
+  local late = scan.late
+  scan.awaiting, scan.late = false, false
   local count = C_AuctionHouse.GetNumReplicateItems() or 0
+  ns.Log("Full Scan data: %d listings, %d s after asking%s", count,
+    math.floor(GetTime() - (scan.askedAt or GetTime()) + 0.5), late and " (after the wait, read anyway)" or "")
   if count == 0 then
     return
   end
@@ -783,7 +802,12 @@ local function StartScan(manual, tries)
   if db.chat then
     Print("Full Scan started (asking the server for every auction)...")
   end
-  C_AuctionHouse.ReplicateItems() -- our hook marks the scan as requested
+  askingOwn = true
+  local ok, err = pcall(C_AuctionHouse.ReplicateItems) -- our hook marks the scan as requested
+  askingOwn = false
+  if not ok then
+    Print("Couldn't start the Full Scan: " .. tostring(err))
+  end
 end
 ns.StartFullScan = StartScan
 
@@ -1312,8 +1336,15 @@ events:SetScript("OnEvent", ns.Guard("core events", function(_, event, ...)
       scan.worker = nil
       scan.gen = scan.gen + 1
       Print("Full Scan cancelled: the Auction House closed before it was read.")
+    elseif scan.awaiting or scan.late then
+      ns.Log("Auction House closed %d s after asking for a Full Scan, before its data came",
+        math.floor(GetTime() - (scan.askedAt or GetTime()) + 0.5))
+      if scan.ours and db.chat then
+        Print("Full Scan lost: the Auction House closed before the server sent it (that can take half a minute).")
+      end
     end
     scan.awaiting = false
+    scan.late = false
   elseif event == "REPLICATE_ITEM_LIST_UPDATE" then
     OnReplicateReady()
   end

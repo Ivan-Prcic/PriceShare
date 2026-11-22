@@ -3,8 +3,9 @@
 A light Auction House price addon for WoW Forever, shared with your friends.
 
 - **Scans for you.** Opening the Auction House starts a Full Scan, at most once every 15 minutes
-  (the server's limit). The **Quick Scan** button works in between: it loads every page of an
-  empty search. Scans from VendorSnipe or Auctionator count too.
+  (the server's limit). The server can take half a minute to send it, so leave the Auction House
+  open until PriceShare says "Full Scan: … items". The **Quick Scan** button works in between: it
+  loads every page of an empty search. Scans from VendorSnipe or Auctionator count too.
 - **Shares with friends.** Friends who also run PriceShare are found automatically, and the newest
   scan anyone has is passed around in the background, so not everyone has to scan.
 - **Tooltip.** Shows the cheapest price per item and what everything you have of it is worth,

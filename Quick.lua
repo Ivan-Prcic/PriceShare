@@ -193,6 +193,7 @@ end)
 -- Buttons above the Auction House window
 ---------------------------------------------------------------------------
 local ui
+local BAR_WIDTH = 104 + 4 + 116 + 4 + 104 -- Price Lookup, Full Scan and Quick Scan, side by side
 
 local function UpdateButtons()
   if not ui or not ns.db then
@@ -242,7 +243,7 @@ function Quick.CreateButtons()
     return
   end
   ui = CreateFrame("Frame", nil, AuctionHouseFrame)
-  ui:SetSize(540, 24)
+  ui:SetSize(BAR_WIDTH, 24)
   ui:SetPoint("BOTTOMRIGHT", AuctionHouseFrame, "TOPRIGHT", -4, 2)
   ui.quick = CreateFrame("Button", nil, ui, "UIPanelButtonTemplate")
   ui.quick:SetSize(104, 22)
@@ -271,9 +272,15 @@ function Quick.CreateButtons()
   end)
   Tip(ui.lookup, "Price Lookup", "Look up any item's price from the newest scan you or a friend has, without searching here. " ..
     "Also on the minimap button, anywhere.")
+  -- How old the prices are goes above the buttons, never to their left: other addons put
+  -- buttons along the Auction House's top edge too, and a long line ran in under them.
   ui.label = ui:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  ui.label:SetPoint("RIGHT", ui.lookup, "LEFT", -8, 0)
+  ui.label:SetPoint("BOTTOMRIGHT", ui.quick, "TOPRIGHT", -2, 3)
+  ui.label:SetWidth(BAR_WIDTH - 4)
   ui.label:SetJustifyH("RIGHT")
+  if ui.label.SetWordWrap then
+    ui.label:SetWordWrap(false) -- too long for the buttons' width: cut off with "...", not wrapped
+  end
   local elapsed = 0
   ui:SetScript("OnUpdate", function(_, dt)
     elapsed = elapsed + (dt or 0)
